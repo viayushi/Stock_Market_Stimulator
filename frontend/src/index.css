@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Add this to support nav underline animation */
+.group:hover .group-hover\:after\:scale-x-100:after {
+  transform: scaleX(1);
+}
