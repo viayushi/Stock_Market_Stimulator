@@ -1,9 +1,9 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = 'http://localhost:5000'; // Backend URL
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
-export function useRealTimePrice(symbol) {
+export function useSocketPrice(symbol) {
   const [price, setPrice] = useState(null);
   const socketRef = useRef(null);
 

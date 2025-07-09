@@ -1,0 +1,12 @@
+[
+  { "symbol": "RELIANCE.NSE", "company_name": "Reliance Industries Ltd" },
+  { "symbol": "TCS.NSE", "company_name": "Tata Consultancy Services Ltd" },
+  { "symbol": "INFY.NSE", "company_name": "Infosys Ltd" },
+  { "symbol": "HDFCBANK.NSE", "company_name": "HDFC Bank Ltd" },
+  { "symbol": "ICICIBANK.NSE", "company_name": "ICICI Bank Ltd" },
+  { "symbol": "HINDUNILVR.NSE", "company_name": "Hindustan Unilever Ltd" },
+  { "symbol": "SBIN.NSE", "company_name": "State Bank of India" },
+  { "symbol": "BAJFINANCE.NSE", "company_name": "Bajaj Finance Ltd" },
+  { "symbol": "BHARTIARTL.NSE", "company_name": "Bharti Airtel Ltd" },
+  { "symbol": "KOTAKBANK.NSE", "company_name": "Kotak Mahindra Bank Ltd" }
+] 

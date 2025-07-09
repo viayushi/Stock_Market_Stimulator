@@ -25,7 +25,6 @@ const mongoose = require('mongoose');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
 const http = require('http');
-const { Server } = require('socket.io');
 require('dotenv').config();
 
 const app = express();
@@ -197,14 +196,16 @@ app.use((req, res, next) => {
 // Import routes
 const authRoutes = require('./src/routes/auth.routes');
 const portfolioRoutes = require('./src/routes/portfolio.routes');
-const upstoxRoutes = require('./src/routes/upstox.routes');
-const watchlistRoutes = require('./src/routes/watchlist.routes');
+const marketRoutes = require('./src/routes/market.routes');
+const orderRoutes = require('./src/routes/order.routes');
+const transactionRoutes = require('./src/routes/transaction.routes');
 
 // Use routes
 app.use('/api/auth', authRoutes);
 app.use('/api/portfolio', portfolioRoutes);
-app.use('/api/upstox', upstoxRoutes);
-app.use('/api/watchlist', watchlistRoutes);
+app.use('/api/market', marketRoutes);
+app.use('/api/order', orderRoutes);
+app.use('/api/transactions', transactionRoutes);
 
 // Test endpoint to verify server is running
 app.get('/api/test', (req, res) => {
@@ -260,163 +261,9 @@ app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
-// Enhanced server startup with graceful shutdown
 const startServer = () => {
   try {
     const server = http.createServer(app);
-    const io = new Server(server, {
-      cors: {
-        origin: corsOptions.origin,
-        credentials: true
-      }
-    });
-
-    // --- Socket.IO Real-Time Price Relay ---
-    const WebSocket = require('ws');
-    const UPSTOX_WS_URL = process.env.UPSTOX_WS_URL || 'wss://ws-api.upstox.com/index/ddf/stream/v1';
-    // --- Upstox API Credentials ---
-    const UPSTOX_API_KEY = process.env.UPSTOX_API_KEY || '';
-    const UPSTOX_API_SECRET = process.env.UPSTOX_API_SECRET || '';
-    const UPSTOX_ACCESS_TOKEN = process.env.UPSTOX_ACCESS_TOKEN || '';
-    let upstoxWS = null;
-    let wsConnected = false;
-    let symbolSubscriptions = {};
-    let restPollingInterval = null;
-
-    function emitPriceUpdateREST(symbols) {
-      if (!symbols.length) return;
-      axios.get('https://api-v2.upstox.com/market/quote', {
-        headers: {
-          'Authorization': `Bearer ${UPSTOX_ACCESS_TOKEN}`,
-          'Api-Version': '2.0'
-        },
-        params: { symbol: symbols.join(',') }
-      }).then(res => {
-        const data = res.data.data || [];
-        data.forEach(q => {
-          io.to(q.symbol).emit('priceUpdate', {
-            instrument: q.symbol,
-            last_price: q.last_price || q.close,
-            open: q.open,
-            close: q.close,
-            high: q.high,
-            low: q.low,
-            volume: q.volume
-          });
-        });
-      }).catch(() => {});
-    }
-
-    function connectUpstoxWS() {
-      upstoxWS = new WebSocket(UPSTOX_WS_URL);
-      upstoxWS.on('open', () => {
-        wsConnected = true;
-        console.log('Connected to Upstox WebSocket');
-        // Authenticate
-        upstoxWS.send(JSON.stringify({
-          guid: 'auth',
-          method: 'authenticate',
-          data: { access_token: UPSTOX_ACCESS_TOKEN }
-        }));
-      });
-      upstoxWS.on('message', (msg) => {
-        try {
-          const data = JSON.parse(msg);
-          if (data.method === 'authenticated') {
-            console.log('Upstox WebSocket authenticated');
-            // Subscribe to all currently requested symbols
-            const symbols = Object.keys(symbolSubscriptions);
-            if (symbols.length > 0) {
-              upstoxWS.send(JSON.stringify({
-                guid: 'sub',
-                method: 'subscribe',
-                data: { instruments: symbols }
-              }));
-            }
-          } else if (data.method === 'quote') {
-            // Broadcast price update to all clients subscribed to this symbol
-            const symbol = data.data.instrument;
-            io.to(symbol).emit('priceUpdate', data.data);
-          }
-        } catch (e) {
-          // Ignore parse errors
-        }
-      });
-      upstoxWS.on('close', () => {
-        wsConnected = false;
-        console.log('Upstox WebSocket closed, switching to REST polling fallback.');
-        // Start REST polling fallback
-        if (!restPollingInterval) {
-          restPollingInterval = setInterval(() => {
-            const symbols = Object.keys(symbolSubscriptions);
-            emitPriceUpdateREST(symbols);
-          }, 5000);
-        }
-        setTimeout(connectUpstoxWS, 60000); // Try to reconnect WebSocket every 60s
-      });
-      upstoxWS.on('error', (err) => {
-        wsConnected = false;
-        console.error('Upstox WebSocket error:', err.message);
-        upstoxWS.close();
-      });
-    }
-    connectUpstoxWS();
-
-    io.on('connection', (socket) => {
-      console.log('Socket.IO client connected:', socket.id);
-      socket.on('subscribe', (symbol) => {
-        if (!symbolSubscriptions[symbol]) {
-          symbolSubscriptions[symbol] = 0;
-        }
-        symbolSubscriptions[symbol]++;
-        socket.join(symbol);
-        // Subscribe to symbol on Upstox if not already
-        if (wsConnected && symbolSubscriptions[symbol] === 1) {
-          upstoxWS.send(JSON.stringify({
-            guid: 'sub-' + symbol,
-            method: 'subscribe',
-            data: { instruments: [symbol] }
-          }));
-        }
-      });
-      socket.on('unsubscribe', (symbol) => {
-        if (symbolSubscriptions[symbol]) {
-          symbolSubscriptions[symbol]--;
-          if (symbolSubscriptions[symbol] <= 0) {
-            delete symbolSubscriptions[symbol];
-            // Unsubscribe from symbol on Upstox
-            if (wsConnected) {
-              upstoxWS.send(JSON.stringify({
-                guid: 'unsub-' + symbol,
-                method: 'unsubscribe',
-                data: { instruments: [symbol] }
-              }));
-            }
-          }
-        }
-        socket.leave(symbol);
-      });
-      socket.on('disconnect', () => {
-        console.log('Socket.IO client disconnected:', socket.id);
-        // Clean up subscriptions
-        for (const symbol of Object.keys(symbolSubscriptions)) {
-          if (socket.rooms.has(symbol)) {
-            symbolSubscriptions[symbol]--;
-            if (symbolSubscriptions[symbol] <= 0) {
-              delete symbolSubscriptions[symbol];
-              if (wsConnected) {
-                upstoxWS.send(JSON.stringify({
-                  guid: 'unsub-' + symbol,
-                  method: 'unsubscribe',
-                  data: { instruments: [symbol] }
-                }));
-              }
-            }
-          }
-        }
-      });
-    });
-    // --- End Socket.IO Real-Time Price Relay ---
 
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

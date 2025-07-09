@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import { login as apiLogin, register as apiRegister, getCurrentUser } from '../services/authService';
-import { getPortfolio } from '../services/portfolioService';
+import { getHoldings, getPositions, getFunds, getPnL } from '../services/portfolioService';
 
 // Configure axios with the correct base URL
 const API_BASE_URL = 'http://localhost:5000';
@@ -10,14 +10,12 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    // Try to restore user from localStorage on initial load
     const savedUser = localStorage.getItem('user');
     return savedUser ? JSON.parse(savedUser) : null;
   });
   const [loading, setLoading] = useState(true);
-  const [portfolio, setPortfolio] = useState(null);
+  const [portfolio, setPortfolio] = useState({ holdings: [], positions: [], funds: null, pnl: [] });
 
-  // Set up axios defaults on mount
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -32,46 +30,47 @@ export function AuthProvider({ children }) {
       try {
         const token = localStorage.getItem('token');
         if (token) {
-          // Set up axios defaults
           axios.defaults.baseURL = API_BASE_URL;
           axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
           axios.defaults.withCredentials = true;
-          
-          // Try to get current user from server
           try {
             const response = await getCurrentUser();
             const userData = response.data.user;
             setUser(userData);
             localStorage.setItem('user', JSON.stringify(userData));
-            
-            // Try to get portfolio data
             try {
-              const portfolioRes = await getPortfolio();
-              setPortfolio(portfolioRes.data || portfolioRes);
+              const [holdingsRes, positionsRes, fundsRes, pnlRes] = await Promise.all([
+                getHoldings(),
+                getPositions(),
+                getFunds(),
+                getPnL()
+              ]);
+              setPortfolio({
+                holdings: holdingsRes.data || holdingsRes,
+                positions: positionsRes.data || positionsRes,
+                funds: fundsRes.data || fundsRes,
+                pnl: pnlRes.data || pnlRes
+              });
             } catch (portfolioError) {
-              console.log('Portfolio not available yet:', portfolioError.message);
-              setPortfolio(null);
+              setPortfolio({ holdings: [], positions: [], funds: null, pnl: [] });
             }
           } catch (userError) {
-            console.error('Failed to get current user:', userError);
-            // If token is invalid, clear everything
             localStorage.removeItem('token');
             localStorage.removeItem('user');
             delete axios.defaults.headers.common['Authorization'];
             setUser(null);
-            setPortfolio(null);
+            setPortfolio({ holdings: [], positions: [], funds: null, pnl: [] });
           }
         } else {
           setUser(null);
-          setPortfolio(null);
+          setPortfolio({ holdings: [], positions: [], funds: null, pnl: [] });
         }
       } catch (error) {
-        console.error('Auth check failed:', error);
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         delete axios.defaults.headers.common['Authorization'];
         setUser(null);
-        setPortfolio(null);
+        setPortfolio({ holdings: [], positions: [], funds: null, pnl: [] });
       } finally {
         setLoading(false);
       }
@@ -79,7 +78,6 @@ export function AuthProvider({ children }) {
     checkAuth();
   }, []);
 
-  // Persist user to localStorage whenever it changes
   useEffect(() => {
     if (user) {
       localStorage.setItem('user', JSON.stringify(user));
@@ -90,11 +88,20 @@ export function AuthProvider({ children }) {
 
   const refreshPortfolio = async () => {
     try {
-      const portfolioRes = await getPortfolio();
-      setPortfolio(portfolioRes.data || portfolioRes);
+      const [holdingsRes, positionsRes, fundsRes, pnlRes] = await Promise.all([
+        getHoldings(),
+        getPositions(),
+        getFunds(),
+        getPnL()
+      ]);
+      setPortfolio({
+        holdings: holdingsRes.data || holdingsRes,
+        positions: positionsRes.data || positionsRes,
+        funds: fundsRes.data || fundsRes,
+        pnl: pnlRes.data || pnlRes
+      });
     } catch (error) {
-      console.log('Portfolio refresh failed:', error.message);
-      setPortfolio(null);
+      setPortfolio({ holdings: [], positions: [], funds: null, pnl: [] });
     }
   };
 
@@ -103,12 +110,9 @@ export function AuthProvider({ children }) {
       const response = await apiLogin(userData);
       if (response.token) {
         localStorage.setItem('token', response.token);
-        
-        // Set up axios defaults
         axios.defaults.baseURL = API_BASE_URL;
         axios.defaults.headers.common['Authorization'] = `Bearer ${response.token}`;
         axios.defaults.withCredentials = true;
-        
         setUser(response.user);
         localStorage.setItem('user', JSON.stringify(response.user));
         await refreshPortfolio();
@@ -117,21 +121,15 @@ export function AuthProvider({ children }) {
       }
       return response;
     } catch (error) {
-      console.error('AuthContext login error:', error);
       throw error;
     }
   };
 
   const register = async (userData) => {
     try {
-      console.log('AuthContext: Attempting to register user:', { ...userData, password: '[HIDDEN]' });
       const response = await apiRegister(userData);
-      console.log('AuthContext: Registration successful:', response.data);
       return response.data;
     } catch (error) {
-      console.error('AuthContext: Registration failed:', error);
-      
-      // Provide more specific error messages
       if (error.response?.status === 400) {
         if (error.response.data?.message) {
           throw new Error(error.response.data.message);
@@ -151,7 +149,7 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     setUser(null);
-    setPortfolio(null);
+    setPortfolio({ holdings: [], positions: [], funds: null, pnl: [] });
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     delete axios.defaults.headers.common['Authorization'];
@@ -167,7 +165,7 @@ export function AuthProvider({ children }) {
     portfolio,
     setPortfolio,
     refreshPortfolio,
-    balance: portfolio?.cash || 0
+    balance: portfolio?.funds?.available_balance || 0
   };
 
   return (
